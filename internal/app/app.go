@@ -551,6 +551,7 @@ const (
 	defaultAutoInsertEntries       = true
 	defaultListMode                = false
 	defaultAutoOpenIndexJump       = true
+	defaultConfirmDelete           = true
 	defaultStatusMessageDurationMs = 1000
 )
 
@@ -559,6 +560,7 @@ var defaultConfigMarkers = map[string]any{
 	"_autoInsertEntries":       defaultAutoInsertEntries,
 	"_defaultListMode":         defaultListMode,
 	"_autoOpenIndexJump":       defaultAutoOpenIndexJump,
+	"_confirmDelete":           defaultConfirmDelete,
 	"_statusMessageDurationMs": float64(defaultStatusMessageDurationMs),
 }
 
@@ -568,6 +570,7 @@ type Config struct {
 	AutoInsertEntries       *bool    `json:"autoInsertEntries,omitempty"`
 	DefaultListMode         *bool    `json:"defaultListMode,omitempty"`
 	AutoOpenIndexJump       *bool    `json:"autoOpenIndexJump,omitempty"`
+	ConfirmDelete           *bool    `json:"confirmDelete,omitempty"`
 	StatusMessageDurationMs *int     `json:"statusMessageDurationMs,omitempty"`
 }
 
@@ -616,6 +619,13 @@ func (cfg Config) AutoOpenIndexJumpEnabled() bool {
 		return defaultAutoOpenIndexJump
 	}
 	return *cfg.AutoOpenIndexJump
+}
+
+func (cfg Config) ConfirmDeleteEnabled() bool {
+	if cfg.ConfirmDelete == nil {
+		return defaultConfirmDelete
+	}
+	return *cfg.ConfirmDelete
 }
 
 func (cfg Config) StatusMessageDuration() time.Duration {

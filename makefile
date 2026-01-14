@@ -7,9 +7,6 @@ all: clean test
 build:
 	CGO_ENABLED=0 go build $(LDFLAGS) -o ./bin/wlog ./cmd/cli
 
-build-tui:
-	CGO_ENABLED=0 go build $(LDFLAGS) -o ./bin/wlog-tui ./cmd/tui
-
 clean:
 	rm -rf ./bin
 

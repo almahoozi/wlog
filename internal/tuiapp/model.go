@@ -46,6 +46,11 @@ type detailState struct {
 	input    textinput.Model
 }
 
+type deleteConfirmState struct {
+	question   string
+	entryIndex int
+}
+
 type statusTimeoutMsg struct {
 	seq int
 }
@@ -78,9 +83,14 @@ type model struct {
 	showHints     bool
 	autoInsert    bool
 	autoOpenIndex bool
+	confirmDelete bool
 
 	view   viewMode
 	detail detailState
+
+	deleteConfirm    *deleteConfirmState
+	confirmPrompt    string
+	showDeletePrompt bool
 
 	status         string
 	statusSeq      int
@@ -106,6 +116,7 @@ func newModel(cfg app.Config) (*model, error) {
 	autoInsert := cfg.AutoInsertEnabled()
 	listModeDefault := cfg.DefaultListModeEnabled()
 	autoOpenIndex := cfg.AutoOpenIndexJumpEnabled()
+	confirmDelete := cfg.ConfirmDeleteEnabled()
 	statusTimeout := cfg.StatusMessageDuration()
 
 	ti := textinput.New()
@@ -123,6 +134,7 @@ func newModel(cfg app.Config) (*model, error) {
 		autoInsert:    autoInsert,
 		listMode:      listModeDefault,
 		autoOpenIndex: autoOpenIndex,
+		confirmDelete: confirmDelete,
 		statusTimeout: statusTimeout,
 		detail: detailState{
 			input: ti,
@@ -177,16 +189,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *model) View() string {
 	var b strings.Builder
 	dayLabel := m.day.Format("Mon 2006-01-02")
-	b.WriteString(fmt.Sprintf("%s — %s\n", dayLabel, relativeDayLabel(m.day)))
+	b.WriteString(fmt.Sprintf("%s — %s\n\n", dayLabel, relativeDayLabel(m.day)))
 	if m.showHints {
 		b.WriteString("←/→ change day • space today • q quit • h/? toggle hints\n")
-		b.WriteString("Enter/i add entry • l toggle list • o open day file • numbers/letters jump\n\n")
-	} else {
-		b.WriteString("\n\n")
+		b.WriteString("Enter/i add entry • e edit • d delete entry • l toggle list • o open day file • numbers/letters jump\n\n")
 	}
 
 	if m.err != nil {
-
 		b.WriteString(fmt.Sprintf("Error: %s\n\n", m.err))
 	}
 
@@ -197,11 +206,16 @@ func (m *model) View() string {
 		b.WriteString(m.renderDetail())
 	}
 
+	if m.showDeletePrompt {
+		b.WriteString("\n" + statusStyle.Render(m.confirmPrompt))
+	}
+
 	if m.status != "" {
 		b.WriteString("\n" + statusStyle.Render(m.status))
 	}
 
-	return b.String()
+	// NOTE: Need to end with a newline for proper rendering
+	return b.String() + "\n"
 }
 
 func (m *model) renderList() string {
@@ -242,7 +256,8 @@ func (m *model) renderList() string {
 	}
 
 	if m.showHints && len(m.rows) > 0 {
-		b.WriteString("\nUse numbers/letters to jump to a question. Enter on an entry opens the editor.")
+		hint := "Use numbers/letters to jump to a question. Enter on an entry opens the editor. Press d to delete an entry."
+		b.WriteString("\n" + hint + "\n")
 	}
 
 	return b.String()
@@ -287,9 +302,17 @@ func (m *model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	}
 
-	switch key {
-	case "ctrl+c", "q":
+	if key == "ctrl+c" || key == "q" {
 		return tea.Quit
+	}
+
+	if m.view == viewList && m.deleteConfirm != nil {
+		if m.handleDeleteConfirmationKey(key) {
+			return nil
+		}
+	}
+
+	switch key {
 	case "h", "?":
 		m.toggleHints()
 		return nil
@@ -353,6 +376,8 @@ func (m *model) handleListKey(msg tea.KeyMsg) tea.Cmd {
 			}
 			return m.openQuestionEditor(row.question)
 		}
+	case "d":
+		m.handleDeleteEntryRequest()
 	case "l":
 		m.toggleListMode()
 	case "o":
@@ -366,14 +391,88 @@ func (m *model) handleListKey(msg tea.KeyMsg) tea.Cmd {
 			if (r == 'j' || r == 'k') && !m.disableJKNav {
 				return nil
 			}
-			m.jumpToIndex(r)
-			if m.autoOpenIndex {
+			if m.jumpToIndex(r) && m.autoOpenIndex {
 				return m.activateSelection()
 			}
 		}
 	}
 
 	return nil
+}
+
+func (m *model) handleDeleteEntryRequest() {
+	if !m.listMode {
+		m.setStatus("Enable list mode to delete entries.")
+		return
+	}
+	row := m.currentRow()
+	if row == nil || row.kind != rowEntry {
+		m.setStatus("Select an entry to delete.")
+		return
+	}
+	m.initiateEntryDelete(row.question, row.entryIndex)
+}
+
+func (m *model) initiateEntryDelete(question string, entryIndex int) {
+	entries := m.log.Answers[question]
+	if entryIndex < 0 || entryIndex >= len(entries) {
+		m.setStatus("Entry not found.")
+		return
+	}
+	if m.confirmDelete {
+		m.deleteConfirm = &deleteConfirmState{question: question, entryIndex: entryIndex}
+		m.confirmPrompt = "Delete this entry? (y/n)"
+		m.showDeletePrompt = true
+		return
+	}
+	m.performDeleteEntry(question, entryIndex)
+}
+
+func (m *model) handleDeleteConfirmationKey(key string) bool {
+	if m.deleteConfirm == nil {
+		return false
+	}
+	switch key {
+	case "y", "Y":
+		pending := m.deleteConfirm
+		m.deleteConfirm = nil
+		m.confirmPrompt = ""
+		m.showDeletePrompt = false
+		m.performDeleteEntry(pending.question, pending.entryIndex)
+	case "n", "N", "esc":
+		m.deleteConfirm = nil
+		m.confirmPrompt = ""
+		m.showDeletePrompt = false
+		m.setStatus("Delete canceled.")
+	default:
+		m.setStatus("Confirm delete with y or n.")
+	}
+	return true
+}
+
+func (m *model) performDeleteEntry(question string, idx int) {
+	entries := m.log.Answers[question]
+	if idx < 0 || idx >= len(entries) {
+		m.setStatus("Entry not found.")
+		return
+	}
+	entries = append(entries[:idx], entries[idx+1:]...)
+	if len(entries) == 0 {
+		delete(m.log.Answers, question)
+	} else {
+		m.log.Answers[question] = entries
+	}
+	if err := app.SaveDayLog(m.day, m.log); err != nil {
+		m.err = err
+		m.setStatus("Failed to delete entry.")
+		return
+	}
+	m.err = nil
+	m.confirmPrompt = ""
+	m.showDeletePrompt = false
+	m.setStatus("Entry deleted.")
+	m.refreshQuestions()
+	m.selectQuestionByName(question)
 }
 
 func (m *model) openDayJSON() tea.Cmd {
@@ -443,6 +542,9 @@ func (m *model) activateSelection() tea.Cmd {
 
 func (m *model) openDetail(question string, startEditing bool) {
 	m.view = viewDetail
+	m.deleteConfirm = nil
+	m.confirmPrompt = ""
+	m.showDeletePrompt = false
 	m.detail.question = question
 	if startEditing {
 		m.startEditing()
@@ -604,12 +706,20 @@ func (m *model) moveSelection(delta int) {
 	m.selected = next
 }
 
-func (m *model) jumpToIndex(r rune) {
+func (m *model) jumpToIndex(r rune) bool {
 	idx, ok := runeToIndex(r)
 	if !ok {
-		return
+		return false
 	}
-	m.selectQuestionByIndex(idx)
+	if idx < 0 || idx >= len(m.questions) {
+		return false
+	}
+	rowIdx := m.rowIndexForQuestion(idx)
+	if rowIdx < 0 {
+		return false
+	}
+	m.selected = rowIdx
+	return true
 }
 
 func (m *model) selectQuestionByIndex(idx int) {
@@ -619,6 +729,12 @@ func (m *model) selectQuestionByIndex(idx int) {
 	rowIdx := m.rowIndexForQuestion(idx)
 	if rowIdx >= 0 {
 		m.selected = rowIdx
+	}
+}
+
+func (m *model) selectQuestionByName(question string) {
+	if idx, ok := m.questionIndex[question]; ok {
+		m.selectQuestionByIndex(idx)
 	}
 }
 
@@ -683,7 +799,9 @@ func (m *model) toggleHints() {
 }
 
 func (m *model) refreshQuestions() {
-
+	m.deleteConfirm = nil
+	m.confirmPrompt = ""
+	m.showDeletePrompt = false
 	m.questions = mergeQuestions(m.cfgQuestions, m.log)
 	m.questionIndex = make(map[string]int, len(m.questions))
 	for i, q := range m.questions {

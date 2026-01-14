@@ -28,6 +28,7 @@ const (
 	cfgFieldAutoInsert
 	cfgFieldDefaultListMode
 	cfgFieldAutoOpenIndex
+	cfgFieldConfirmDelete
 	cfgFieldStatusDuration
 )
 
@@ -47,6 +48,8 @@ type configValues struct {
 	DefaultListModeCustom bool
 	AutoOpenIndexJump     bool
 	AutoOpenIndexCustom   bool
+	ConfirmDelete         bool
+	ConfirmDeleteCustom   bool
 	StatusDuration        int
 	StatusDurationSet     bool
 }
@@ -62,6 +65,8 @@ func newConfigValues(cfg app.Config) configValues {
 		DefaultListModeCustom: cfg.DefaultListMode != nil,
 		AutoOpenIndexJump:     cfg.AutoOpenIndexJumpEnabled(),
 		AutoOpenIndexCustom:   cfg.AutoOpenIndexJump != nil,
+		ConfirmDelete:         cfg.ConfirmDeleteEnabled(),
+		ConfirmDeleteCustom:   cfg.ConfirmDelete != nil,
 	}
 	resolved := int(cfg.StatusMessageDuration() / time.Millisecond)
 	if resolved <= 0 {
@@ -98,6 +103,8 @@ func (v configValues) equal(other configValues) bool {
 		v.DefaultListModeCustom == other.DefaultListModeCustom &&
 		v.AutoOpenIndexJump == other.AutoOpenIndexJump &&
 		v.AutoOpenIndexCustom == other.AutoOpenIndexCustom &&
+		v.ConfirmDelete == other.ConfirmDelete &&
+		v.ConfirmDeleteCustom == other.ConfirmDeleteCustom &&
 		v.StatusDuration == other.StatusDuration &&
 		v.StatusDurationSet == other.StatusDurationSet
 }
@@ -115,6 +122,9 @@ func (v configValues) toConfig() app.Config {
 	}
 	if v.AutoOpenIndexCustom {
 		cfg.AutoOpenIndexJump = boolPtr(v.AutoOpenIndexJump)
+	}
+	if v.ConfirmDeleteCustom {
+		cfg.ConfirmDelete = boolPtr(v.ConfirmDelete)
 	}
 	if v.StatusDurationSet {
 		cfg.StatusMessageDurationMs = intPtr(v.StatusDuration)
@@ -338,6 +348,9 @@ func (m *configModel) resetBoolField(field configField) {
 	case cfgFieldAutoOpenIndex:
 		m.values.AutoOpenIndexJump = defaultCfg.AutoOpenIndexJumpEnabled()
 		m.values.AutoOpenIndexCustom = false
+	case cfgFieldConfirmDelete:
+		m.values.ConfirmDelete = defaultCfg.ConfirmDeleteEnabled()
+		m.values.ConfirmDeleteCustom = false
 	default:
 		changed = false
 	}
@@ -477,6 +490,9 @@ func (m *configModel) toggleBool(field configField) {
 	case cfgFieldAutoOpenIndex:
 		m.values.AutoOpenIndexJump = !m.values.AutoOpenIndexJump
 		m.values.AutoOpenIndexCustom = true
+	case cfgFieldConfirmDelete:
+		m.values.ConfirmDelete = !m.values.ConfirmDelete
+		m.values.ConfirmDeleteCustom = true
 	}
 	m.markDirty()
 }
@@ -563,7 +579,7 @@ func (m *configModel) handleConfigFileResult(err error) {
 }
 
 func (m *configModel) rebuildRows() {
-	rows := make([]configRow, 0, len(m.values.Questions)+4)
+	rows := make([]configRow, 0, len(m.values.Questions)+6)
 	for idx := range m.values.Questions {
 		rows = append(rows, configRow{kind: cfgRowQuestion, index: idx})
 	}
@@ -572,6 +588,7 @@ func (m *configModel) rebuildRows() {
 	rows = append(rows, configRow{kind: cfgRowBool, field: cfgFieldAutoInsert})
 	rows = append(rows, configRow{kind: cfgRowBool, field: cfgFieldDefaultListMode})
 	rows = append(rows, configRow{kind: cfgRowBool, field: cfgFieldAutoOpenIndex})
+	rows = append(rows, configRow{kind: cfgRowBool, field: cfgFieldConfirmDelete})
 	rows = append(rows, configRow{kind: cfgRowInt, field: cfgFieldStatusDuration})
 	m.rows = rows
 	if m.selected >= len(rows) {
@@ -628,6 +645,8 @@ func (m *configModel) View() string {
 				b.WriteString(fmt.Sprintf("%s  Default list mode: %s\n", marker, boolLabel(m.values.DefaultListMode, !m.values.DefaultListModeCustom)))
 			case cfgFieldAutoOpenIndex:
 				b.WriteString(fmt.Sprintf("%s  Auto-open index jumps: %s\n", marker, boolLabel(m.values.AutoOpenIndexJump, !m.values.AutoOpenIndexCustom)))
+			case cfgFieldConfirmDelete:
+				b.WriteString(fmt.Sprintf("%s  Confirm deletes: %s\n", marker, boolLabel(m.values.ConfirmDelete, !m.values.ConfirmDeleteCustom)))
 			case cfgFieldStatusDuration:
 				label := fmt.Sprintf("%d ms", m.values.resolvedStatusDuration())
 				if !m.values.StatusDurationSet {
