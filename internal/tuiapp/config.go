@@ -237,11 +237,13 @@ func (m *configModel) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.moveSelection(1)
 	case "enter", " ":
 		return m.activateSelection()
-	case "s":
+	case "d":
+		m.deleteOrDefaultSelection()
+	case "w":
 		m.saveChanges()
 	case "r":
 		m.reloadFromDisk()
-	case "o":
+	case "e":
 		return m.openConfigJSON()
 	}
 	return nil
@@ -293,6 +295,70 @@ func (m *configModel) activateSelection() tea.Cmd {
 		m.startIntEdit(row.field)
 	}
 	return nil
+}
+
+func (m *configModel) deleteOrDefaultSelection() {
+	row := m.currentRow()
+	if row == nil {
+		return
+	}
+	switch row.kind {
+	case cfgRowQuestion:
+		m.deleteQuestion(row.index)
+	case cfgRowBool:
+		m.resetBoolField(row.field)
+	case cfgRowInt:
+		m.resetIntField(row.field)
+	}
+}
+
+func (m *configModel) deleteQuestion(idx int) {
+	if idx < 0 || idx >= len(m.values.Questions) {
+		return
+	}
+	m.values.Questions = append(m.values.Questions[:idx], m.values.Questions[idx+1:]...)
+	m.rebuildRows()
+	m.markDirty()
+	m.setStatus("Question deleted.")
+}
+
+func (m *configModel) resetBoolField(field configField) {
+	defaultCfg := app.Config{}
+	changed := true
+	switch field {
+	case cfgFieldShowHints:
+		m.values.ShowHints = defaultCfg.HintsEnabled()
+		m.values.ShowHintsCustom = false
+	case cfgFieldAutoInsert:
+		m.values.AutoInsert = defaultCfg.AutoInsertEnabled()
+		m.values.AutoInsertCustom = false
+	case cfgFieldDefaultListMode:
+		m.values.DefaultListMode = defaultCfg.DefaultListModeEnabled()
+		m.values.DefaultListModeCustom = false
+	case cfgFieldAutoOpenIndex:
+		m.values.AutoOpenIndexJump = defaultCfg.AutoOpenIndexJumpEnabled()
+		m.values.AutoOpenIndexCustom = false
+	default:
+		changed = false
+	}
+	if !changed {
+		return
+	}
+	m.markDirty()
+	m.setStatus("Option reset to default.")
+}
+
+func (m *configModel) resetIntField(field configField) {
+	defaultCfg := app.Config{}
+	switch field {
+	case cfgFieldStatusDuration:
+		m.values.StatusDuration = int(defaultCfg.StatusMessageDuration() / time.Millisecond)
+		m.values.StatusDurationSet = false
+	default:
+		return
+	}
+	m.markDirty()
+	m.setStatus("Option reset to default.")
 }
 
 func (m *configModel) currentRow() *configRow {
@@ -572,7 +638,7 @@ func (m *configModel) View() string {
 		}
 	}
 
-	b.WriteString("\nCommands: Enter edit/toggle • s save • r reload • o open file • q quit\n")
+	b.WriteString("\nCommands: Enter edit/toggle • d delete/default • w write • r reload • e edit file • q quit\n")
 	if m.editing {
 		b.WriteString("\n" + m.input.View() + "\n")
 	}

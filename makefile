@@ -1,4 +1,4 @@
-.PHONY: all build build-tui clean run run-tui run-cli test install install-tui install-cli
+.PHONY: all build build-tui clean run test install
 
 LDFLAGS=-ldflags "-X main.commit=`git rev-parse HEAD` -X main.ref=`git rev-parse --abbrev-ref HEAD` -X main.version=`git describe --tags --always`"
 
@@ -14,22 +14,13 @@ clean:
 	rm -rf ./bin
 
 install:
-	go install $(LDFLAGS) .
-
-install-cli:
-	go install $(LDFLAGS) ./cmd/cli
-
-install-tui:
-	go install $(LDFLAGS) ./cmd/tui
+	@echo "Installing wlog..."
+	@CGO_ENABLED=0 go install $(LDFLAGS) .
+	@wlog version
+	@echo "wlog installed successfully to $(GOPATH)/bin/wlog"
 
 run:
-	go run $(LDFLAGS) .
-
-run-cli:
-	go run $(LDFLAGS) ./cmd/cli
-
-run-tui:
-	go run $(LDFLAGS) ./cmd/tui
+	CGO_ENABLED=0 go run $(LDFLAGS) .
 
 test:
 	go test -v ./...
