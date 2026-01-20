@@ -20,6 +20,13 @@ Start the application, you will be greeted with all the hints you need to get st
 wlog
 ```
 
+Write the list view to stdout:
+
+```bash
+wlog cat
+wlog cat "last 3 days"
+```
+
 ### Config
 
 Run the TUI to see the defaults and modify config as needed.

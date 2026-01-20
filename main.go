@@ -60,6 +60,7 @@ Usage:
   wlog version         Show build metadata
   wlog ls              Print the log storage directory path
   wlog ls config       Print the config file path
+  wlog cat [interval]  Print the list view for today or a plain-english period
   wlog help            Show this help message
 
 Tip: Press h in the TUI to toggle on-screen hints.`))

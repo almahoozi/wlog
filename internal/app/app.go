@@ -46,6 +46,9 @@ func Run(args []string, build BuildInfo) error {
 	case "view":
 		interval := strings.Join(args[1:], " ")
 		return RunView(interval, cfg.Questions)
+	case "cat":
+		interval := strings.Join(args[1:], " ")
+		return RunCat(interval, cfg.Questions)
 	case "ls":
 		return RunLS(args[1:])
 	case "help", "-h", "--help":
@@ -67,6 +70,9 @@ Usage:
   wlog view           Show today's entries
   wlog view <interval>
                       Show entries for a plain-english interval (e.g. "yesterday", "last 3 days", "last week", "this year")
+  wlog cat             Print today's entries in list-view format
+  wlog cat <interval>
+                      Print entries in list-view format for a plain-english interval
   wlog ls              Print the log storage directory path
   wlog ls config       Print the config file path
   wlog help           Show this help message
@@ -190,6 +196,128 @@ func RunView(interval string, questions []string) error {
 	}
 
 	return nil
+}
+
+func RunCat(interval string, questions []string) error {
+	start, end, err := ParseInterval(interval)
+	if err != nil {
+		return err
+	}
+
+	trimmed := strings.ToLower(strings.TrimSpace(interval))
+	forceSingleDay := start.Equal(end) && (trimmed == "" || trimmed == "today")
+	printed := false
+
+	for cursor := start; !cursor.After(end); cursor = cursor.AddDate(0, 0, 1) {
+		log, err := LoadDayLog(cursor)
+		if err != nil {
+			return err
+		}
+		if !forceSingleDay && !dayLogHasEntries(log) {
+			continue
+		}
+		fmt.Print(renderListView(cursor, log, questions))
+		printed = true
+	}
+
+	if !printed {
+		fmt.Printf("No entries found for %s.\n", intervalLabel(interval))
+	}
+
+	return nil
+}
+
+func dayLogHasEntries(log DayLog) bool {
+	for _, answers := range log.Answers {
+		if len(answers) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+var listIndexRunes = []rune{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'}
+
+func renderListView(day time.Time, log DayLog, base []string) string {
+	if log.Answers == nil {
+		log.Answers = make(map[string][]Answer)
+	}
+
+	var b strings.Builder
+	dayLabel := day.Format("Mon 2006-01-02")
+	b.WriteString(fmt.Sprintf("%s — %s\n\n", dayLabel, relativeDayLabel(day)))
+
+	ordered := mergeQuestionsForList(base, log)
+	if len(ordered) == 0 {
+		b.WriteString("No questions configured.\n\n")
+		return b.String()
+	}
+
+	for idx, q := range ordered {
+		answers := log.Answers[q]
+		label := "--"
+		if idx < len(listIndexRunes) {
+			label = string(listIndexRunes[idx])
+		}
+		countLabel := ""
+		if len(answers) > 0 {
+			countLabel = fmt.Sprintf(" (%d)", len(answers))
+		}
+		b.WriteString(fmt.Sprintf("[%s] %s%s\n", label, q, countLabel))
+		for _, ans := range answers {
+			b.WriteString(fmt.Sprintf("    - [%s] %s\n", DisplayTime(ans.Time), ans.Response))
+		}
+	}
+
+	b.WriteString("\n")
+	return b.String()
+}
+
+func mergeQuestionsForList(base []string, log DayLog) []string {
+	seen := make(map[string]bool)
+	list := make([]string, 0, len(base)+len(log.Answers))
+	for _, q := range base {
+		list = append(list, q)
+		seen[q] = true
+	}
+	var extras []string
+	for q, answers := range log.Answers {
+		if len(answers) == 0 {
+			continue
+		}
+		if !seen[q] {
+			extras = append(extras, q)
+			seen[q] = true
+		}
+	}
+	sort.Strings(extras)
+	list = append(list, extras...)
+	return list
+}
+
+func relativeDayLabel(day time.Time) string {
+	today := DayFloor(time.Now())
+	switch {
+	case day.Equal(today):
+		return "Today"
+	case day.Equal(today.AddDate(0, 0, -1)):
+		return "Yesterday"
+	case day.Equal(today.AddDate(0, 0, 1)):
+		return "Tomorrow"
+	}
+	delta := int(day.Sub(today).Hours() / 24)
+	if delta > 0 {
+		return fmt.Sprintf("In %d days", delta)
+	}
+	return fmt.Sprintf("%d days ago", -delta)
+}
+
+func intervalLabel(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "today"
+	}
+	return trimmed
 }
 
 func printDayLog(day DayLog, questions []string) {
