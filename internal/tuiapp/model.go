@@ -55,6 +55,10 @@ type statusTimeoutMsg struct {
 	seq int
 }
 
+type escapeConfirmTimeoutMsg struct {
+	seq int
+}
+
 type externalOpenKind int
 
 const (
@@ -78,12 +82,15 @@ type model struct {
 	rows          []listRow
 	selected      int
 
-	listMode      bool
-	disableJKNav  bool
-	showHints     bool
-	autoInsert    bool
-	autoOpenIndex bool
-	confirmDelete bool
+	listMode             bool
+	disableJKNav         bool
+	showHints            bool
+	autoInsert           bool
+	continueAfterInsert  bool
+	autoOpenIndex        bool
+	confirmDelete        bool
+	confirmEscape        bool
+	escapeConfirmTimeout time.Duration
 
 	view   viewMode
 	detail detailState
@@ -91,6 +98,11 @@ type model struct {
 	deleteConfirm    *deleteConfirmState
 	confirmPrompt    string
 	showDeletePrompt bool
+
+	escapeConfirmActive bool
+	escapeConfirmSeq    int
+	escapeConfirmTimer  tea.Cmd
+	escapeConfirmPrompt string
 
 	status         string
 	statusSeq      int
@@ -114,9 +126,12 @@ func newModel(cfg app.Config) (*model, error) {
 
 	showHints := cfg.HintsEnabled()
 	autoInsert := cfg.AutoInsertEnabled()
+	continueAfterInsert := cfg.ContinueInsertAfterSaveEnabled()
 	listModeDefault := cfg.DefaultListModeEnabled()
 	autoOpenIndex := cfg.AutoOpenIndexJumpEnabled()
 	confirmDelete := cfg.ConfirmDeleteEnabled()
+	confirmEscape := cfg.ConfirmEscapeWithTextEnabled()
+	escapeConfirmTimeout := cfg.EscapeConfirmTimeout()
 	statusTimeout := cfg.StatusMessageDuration()
 
 	ti := textinput.New()
@@ -126,16 +141,19 @@ func newModel(cfg app.Config) (*model, error) {
 	ti.Width = 60
 
 	m := &model{
-		cfgQuestions:  append([]string(nil), cfg.Questions...),
-		config:        cfg,
-		day:           day,
-		log:           log,
-		showHints:     showHints,
-		autoInsert:    autoInsert,
-		listMode:      listModeDefault,
-		autoOpenIndex: autoOpenIndex,
-		confirmDelete: confirmDelete,
-		statusTimeout: statusTimeout,
+		cfgQuestions:         append([]string(nil), cfg.Questions...),
+		config:               cfg,
+		day:                  day,
+		log:                  log,
+		showHints:            showHints,
+		autoInsert:           autoInsert,
+		continueAfterInsert:  continueAfterInsert,
+		listMode:             listModeDefault,
+		autoOpenIndex:        autoOpenIndex,
+		confirmDelete:        confirmDelete,
+		confirmEscape:        confirmEscape,
+		escapeConfirmTimeout: escapeConfirmTimeout,
+		statusTimeout:        statusTimeout,
 		detail: detailState{
 			input: ti,
 		},
@@ -174,6 +192,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.seq == m.statusSeq {
 			m.status = ""
 		}
+	case escapeConfirmTimeoutMsg:
+		if msg.seq == m.escapeConfirmSeq && m.escapeConfirmActive {
+			m.clearEscapeConfirmPrompt()
+		}
 	case externalOpenResultMsg:
 		m.handleExternalOpenResult(msg)
 	}
@@ -181,6 +203,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.statusTimerCmd != nil {
 		cmds = append(cmds, m.statusTimerCmd)
 		m.statusTimerCmd = nil
+	}
+	if m.escapeConfirmTimer != nil {
+		cmds = append(cmds, m.escapeConfirmTimer)
+		m.escapeConfirmTimer = nil
 	}
 
 	return m, tea.Batch(cmds...)
@@ -208,6 +234,10 @@ func (m *model) View() string {
 
 	if m.showDeletePrompt {
 		b.WriteString("\n" + statusStyle.Render(m.confirmPrompt))
+	}
+
+	if m.escapeConfirmActive && m.escapeConfirmPrompt != "" {
+		b.WriteString("\n" + statusStyle.Render(m.escapeConfirmPrompt))
 	}
 
 	if m.status != "" {
@@ -494,21 +524,32 @@ func (m *model) openDayJSON() tea.Cmd {
 
 func (m *model) handleDetailKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
+	if m.detail.editing && key != "esc" && m.escapeConfirmActive {
+		m.clearEscapeConfirmPrompt()
+	}
 	switch key {
 	case "esc":
 		if m.detail.editing {
-			m.detail.editing = false
-			m.detail.input.Blur()
-			m.detail.input.SetValue("")
-			m.setStatus("Insert canceled.")
+			if m.shouldConfirmEscape() {
+				if m.escapeConfirmActive {
+					m.clearEscapeConfirmPrompt()
+					m.cancelInlineEditing()
+				} else {
+					m.requestEscapeConfirmPrompt()
+				}
+			} else {
+				m.cancelInlineEditing()
+			}
 		} else {
 			m.view = viewList
 			m.detail.question = ""
+			m.clearEscapeConfirmPrompt()
 		}
 	case "-":
 		if !m.detail.editing {
 			m.view = viewList
 			m.detail.question = ""
+			m.clearEscapeConfirmPrompt()
 		}
 	case "enter":
 		if m.detail.editing {
@@ -549,18 +590,62 @@ func (m *model) openDetail(question string, startEditing bool) {
 	if startEditing {
 		m.startEditing()
 	} else {
-		m.detail.editing = false
-		m.detail.input.Blur()
-		m.detail.input.SetValue("")
+		m.stopInlineEditing()
 	}
 }
 
 func (m *model) startEditing() {
+	m.clearEscapeConfirmPrompt()
 	m.detail.editing = true
 	m.detail.input.SetValue("")
 	m.detail.input.CursorEnd()
 	m.detail.input.Focus()
 	m.setStatus("Adding entries...")
+}
+
+func (m *model) stopInlineEditing() {
+	m.detail.editing = false
+	m.detail.input.Blur()
+	m.detail.input.SetValue("")
+	m.clearEscapeConfirmPrompt()
+}
+
+func (m *model) cancelInlineEditing() {
+	if !m.detail.editing {
+		return
+	}
+	m.stopInlineEditing()
+	m.setStatus("Insert canceled.")
+}
+
+func (m *model) shouldConfirmEscape() bool {
+	if !m.confirmEscape {
+		return false
+	}
+	return strings.TrimSpace(m.detail.input.Value()) != ""
+}
+
+func (m *model) requestEscapeConfirmPrompt() {
+	m.escapeConfirmActive = true
+	m.escapeConfirmSeq++
+	if m.escapeConfirmTimeout > 0 {
+		m.escapeConfirmPrompt = fmt.Sprintf("Press Esc again within %s to cancel entry.", m.escapeConfirmTimeout)
+	} else {
+		m.escapeConfirmPrompt = "Press Esc again to cancel entry."
+	}
+	if m.escapeConfirmTimeout <= 0 {
+		return
+	}
+	seq := m.escapeConfirmSeq
+	m.escapeConfirmTimer = tea.Tick(m.escapeConfirmTimeout, func(time.Time) tea.Msg {
+		return escapeConfirmTimeoutMsg{seq: seq}
+	})
+}
+
+func (m *model) clearEscapeConfirmPrompt() {
+	m.escapeConfirmActive = false
+	m.escapeConfirmPrompt = ""
+	m.escapeConfirmTimer = nil
 }
 
 func (m *model) saveInlineEntry() {
@@ -579,7 +664,13 @@ func (m *model) saveInlineEntry() {
 		return
 	}
 	m.err = nil
-	m.detail.input.SetValue("")
+	if m.continueAfterInsert {
+		m.detail.input.SetValue("")
+		m.detail.input.CursorEnd()
+		m.clearEscapeConfirmPrompt()
+	} else {
+		m.stopInlineEditing()
+	}
 	m.setStatus("Entry saved.")
 	m.refreshQuestions()
 }
@@ -854,9 +945,7 @@ func (m *model) reloadDay() {
 	}
 	m.log = log
 	m.view = viewList
-	m.detail.editing = false
-	m.detail.input.Blur()
-	m.detail.input.SetValue("")
+	m.stopInlineEditing()
 	m.selected = 0
 	m.refreshQuestions()
 	m.setStatus(fmt.Sprintf("Viewing %s", m.day.Format("2006-01-02")))

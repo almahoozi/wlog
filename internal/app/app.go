@@ -504,7 +504,11 @@ func applyConfigToMap(raw map[string]any, cfg Config) {
 	setOptionalBool(raw, "autoInsertEntries", cfg.AutoInsertEntries)
 	setOptionalBool(raw, "defaultListMode", cfg.DefaultListMode)
 	setOptionalBool(raw, "autoOpenIndexJump", cfg.AutoOpenIndexJump)
+	setOptionalBool(raw, "confirmDelete", cfg.ConfirmDelete)
+	setOptionalBool(raw, "continueInsertAfterSave", cfg.ContinueInsertAfterSave)
+	setOptionalBool(raw, "confirmEscapeWithText", cfg.ConfirmEscapeWithText)
 	setOptionalInt(raw, "statusMessageDurationMs", cfg.StatusMessageDurationMs)
+	setOptionalInt(raw, "escapeConfirmTimeoutMs", cfg.EscapeConfirmTimeoutMs)
 }
 
 func setOptionalBool(raw map[string]any, key string, value *bool) {
@@ -681,6 +685,9 @@ const (
 	defaultAutoOpenIndexJump       = true
 	defaultConfirmDelete           = true
 	defaultStatusMessageDurationMs = 1000
+	defaultContinueInsertAfterSave = true
+	defaultConfirmEscapeWithText   = true
+	defaultEscapeConfirmTimeoutMs  = 1000
 )
 
 var defaultConfigMarkers = map[string]any{
@@ -690,6 +697,9 @@ var defaultConfigMarkers = map[string]any{
 	"_autoOpenIndexJump":       defaultAutoOpenIndexJump,
 	"_confirmDelete":           defaultConfirmDelete,
 	"_statusMessageDurationMs": float64(defaultStatusMessageDurationMs),
+	"_continueInsertAfterSave": defaultContinueInsertAfterSave,
+	"_confirmEscapeWithText":   defaultConfirmEscapeWithText,
+	"_escapeConfirmTimeoutMs":  float64(defaultEscapeConfirmTimeoutMs),
 }
 
 type Config struct {
@@ -699,7 +709,10 @@ type Config struct {
 	DefaultListMode         *bool    `json:"defaultListMode,omitempty"`
 	AutoOpenIndexJump       *bool    `json:"autoOpenIndexJump,omitempty"`
 	ConfirmDelete           *bool    `json:"confirmDelete,omitempty"`
+	ContinueInsertAfterSave *bool    `json:"continueInsertAfterSave,omitempty"`
+	ConfirmEscapeWithText   *bool    `json:"confirmEscapeWithText,omitempty"`
 	StatusMessageDurationMs *int     `json:"statusMessageDurationMs,omitempty"`
+	EscapeConfirmTimeoutMs  *int     `json:"escapeConfirmTimeoutMs,omitempty"`
 }
 
 type DayLog struct {
@@ -718,6 +731,9 @@ func (cfg *Config) ensureDefaults() {
 	}
 	if cfg.StatusMessageDurationMs != nil && *cfg.StatusMessageDurationMs <= 0 {
 		cfg.StatusMessageDurationMs = nil
+	}
+	if cfg.EscapeConfirmTimeoutMs != nil && *cfg.EscapeConfirmTimeoutMs <= 0 {
+		cfg.EscapeConfirmTimeoutMs = nil
 	}
 }
 
@@ -760,6 +776,28 @@ func (cfg Config) StatusMessageDuration() time.Duration {
 	ms := defaultStatusMessageDurationMs
 	if cfg.StatusMessageDurationMs != nil && *cfg.StatusMessageDurationMs > 0 {
 		ms = *cfg.StatusMessageDurationMs
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+func (cfg Config) ContinueInsertAfterSaveEnabled() bool {
+	if cfg.ContinueInsertAfterSave == nil {
+		return defaultContinueInsertAfterSave
+	}
+	return *cfg.ContinueInsertAfterSave
+}
+
+func (cfg Config) ConfirmEscapeWithTextEnabled() bool {
+	if cfg.ConfirmEscapeWithText == nil {
+		return defaultConfirmEscapeWithText
+	}
+	return *cfg.ConfirmEscapeWithText
+}
+
+func (cfg Config) EscapeConfirmTimeout() time.Duration {
+	ms := defaultEscapeConfirmTimeoutMs
+	if cfg.EscapeConfirmTimeoutMs != nil && *cfg.EscapeConfirmTimeoutMs > 0 {
+		ms = *cfg.EscapeConfirmTimeoutMs
 	}
 	return time.Duration(ms) * time.Millisecond
 }

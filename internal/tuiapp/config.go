@@ -26,10 +26,13 @@ type configField int
 const (
 	cfgFieldShowHints configField = iota
 	cfgFieldAutoInsert
+	cfgFieldContinueInsertAfterSave
 	cfgFieldDefaultListMode
 	cfgFieldAutoOpenIndex
 	cfgFieldConfirmDelete
+	cfgFieldConfirmEscapeWithText
 	cfgFieldStatusDuration
+	cfgFieldEscapeConfirmTimeout
 )
 
 type configRow struct {
@@ -39,34 +42,44 @@ type configRow struct {
 }
 
 type configValues struct {
-	Questions             []string
-	ShowHints             bool
-	ShowHintsCustom       bool
-	AutoInsert            bool
-	AutoInsertCustom      bool
-	DefaultListMode       bool
-	DefaultListModeCustom bool
-	AutoOpenIndexJump     bool
-	AutoOpenIndexCustom   bool
-	ConfirmDelete         bool
-	ConfirmDeleteCustom   bool
-	StatusDuration        int
-	StatusDurationSet     bool
+	Questions                     []string
+	ShowHints                     bool
+	ShowHintsCustom               bool
+	AutoInsert                    bool
+	AutoInsertCustom              bool
+	ContinueInsertAfterSave       bool
+	ContinueInsertAfterSaveCustom bool
+	DefaultListMode               bool
+	DefaultListModeCustom         bool
+	AutoOpenIndexJump             bool
+	AutoOpenIndexCustom           bool
+	ConfirmDelete                 bool
+	ConfirmDeleteCustom           bool
+	ConfirmEscapeWithText         bool
+	ConfirmEscapeWithTextCustom   bool
+	StatusDuration                int
+	StatusDurationSet             bool
+	EscapeConfirmTimeout          int
+	EscapeConfirmTimeoutSet       bool
 }
 
 func newConfigValues(cfg app.Config) configValues {
 	values := configValues{
-		Questions:             append([]string(nil), cfg.Questions...),
-		ShowHints:             cfg.HintsEnabled(),
-		ShowHintsCustom:       cfg.ShowHints != nil,
-		AutoInsert:            cfg.AutoInsertEnabled(),
-		AutoInsertCustom:      cfg.AutoInsertEntries != nil,
-		DefaultListMode:       cfg.DefaultListModeEnabled(),
-		DefaultListModeCustom: cfg.DefaultListMode != nil,
-		AutoOpenIndexJump:     cfg.AutoOpenIndexJumpEnabled(),
-		AutoOpenIndexCustom:   cfg.AutoOpenIndexJump != nil,
-		ConfirmDelete:         cfg.ConfirmDeleteEnabled(),
-		ConfirmDeleteCustom:   cfg.ConfirmDelete != nil,
+		Questions:                     append([]string(nil), cfg.Questions...),
+		ShowHints:                     cfg.HintsEnabled(),
+		ShowHintsCustom:               cfg.ShowHints != nil,
+		AutoInsert:                    cfg.AutoInsertEnabled(),
+		AutoInsertCustom:              cfg.AutoInsertEntries != nil,
+		ContinueInsertAfterSave:       cfg.ContinueInsertAfterSaveEnabled(),
+		ContinueInsertAfterSaveCustom: cfg.ContinueInsertAfterSave != nil,
+		DefaultListMode:               cfg.DefaultListModeEnabled(),
+		DefaultListModeCustom:         cfg.DefaultListMode != nil,
+		AutoOpenIndexJump:             cfg.AutoOpenIndexJumpEnabled(),
+		AutoOpenIndexCustom:           cfg.AutoOpenIndexJump != nil,
+		ConfirmDelete:                 cfg.ConfirmDeleteEnabled(),
+		ConfirmDeleteCustom:           cfg.ConfirmDelete != nil,
+		ConfirmEscapeWithText:         cfg.ConfirmEscapeWithTextEnabled(),
+		ConfirmEscapeWithTextCustom:   cfg.ConfirmEscapeWithText != nil,
 	}
 	resolved := int(cfg.StatusMessageDuration() / time.Millisecond)
 	if resolved <= 0 {
@@ -76,6 +89,16 @@ func newConfigValues(cfg app.Config) configValues {
 	if cfg.StatusMessageDurationMs != nil && *cfg.StatusMessageDurationMs > 0 {
 		values.StatusDurationSet = true
 		values.StatusDuration = *cfg.StatusMessageDurationMs
+	}
+
+	escapeResolved := int(cfg.EscapeConfirmTimeout() / time.Millisecond)
+	if escapeResolved <= 0 {
+		escapeResolved = 1000
+	}
+	values.EscapeConfirmTimeout = escapeResolved
+	if cfg.EscapeConfirmTimeoutMs != nil && *cfg.EscapeConfirmTimeoutMs > 0 {
+		values.EscapeConfirmTimeoutSet = true
+		values.EscapeConfirmTimeout = *cfg.EscapeConfirmTimeoutMs
 	}
 	return values
 }
@@ -99,14 +122,20 @@ func (v configValues) equal(other configValues) bool {
 		v.ShowHintsCustom == other.ShowHintsCustom &&
 		v.AutoInsert == other.AutoInsert &&
 		v.AutoInsertCustom == other.AutoInsertCustom &&
+		v.ContinueInsertAfterSave == other.ContinueInsertAfterSave &&
+		v.ContinueInsertAfterSaveCustom == other.ContinueInsertAfterSaveCustom &&
 		v.DefaultListMode == other.DefaultListMode &&
 		v.DefaultListModeCustom == other.DefaultListModeCustom &&
 		v.AutoOpenIndexJump == other.AutoOpenIndexJump &&
 		v.AutoOpenIndexCustom == other.AutoOpenIndexCustom &&
 		v.ConfirmDelete == other.ConfirmDelete &&
 		v.ConfirmDeleteCustom == other.ConfirmDeleteCustom &&
+		v.ConfirmEscapeWithText == other.ConfirmEscapeWithText &&
+		v.ConfirmEscapeWithTextCustom == other.ConfirmEscapeWithTextCustom &&
 		v.StatusDuration == other.StatusDuration &&
-		v.StatusDurationSet == other.StatusDurationSet
+		v.StatusDurationSet == other.StatusDurationSet &&
+		v.EscapeConfirmTimeout == other.EscapeConfirmTimeout &&
+		v.EscapeConfirmTimeoutSet == other.EscapeConfirmTimeoutSet
 }
 
 func (v configValues) toConfig() app.Config {
@@ -126,8 +155,17 @@ func (v configValues) toConfig() app.Config {
 	if v.ConfirmDeleteCustom {
 		cfg.ConfirmDelete = boolPtr(v.ConfirmDelete)
 	}
+	if v.ContinueInsertAfterSaveCustom {
+		cfg.ContinueInsertAfterSave = boolPtr(v.ContinueInsertAfterSave)
+	}
+	if v.ConfirmEscapeWithTextCustom {
+		cfg.ConfirmEscapeWithText = boolPtr(v.ConfirmEscapeWithText)
+	}
 	if v.StatusDurationSet {
 		cfg.StatusMessageDurationMs = intPtr(v.StatusDuration)
+	}
+	if v.EscapeConfirmTimeoutSet {
+		cfg.EscapeConfirmTimeoutMs = intPtr(v.EscapeConfirmTimeout)
 	}
 	return cfg
 }
@@ -342,6 +380,9 @@ func (m *configModel) resetBoolField(field configField) {
 	case cfgFieldAutoInsert:
 		m.values.AutoInsert = defaultCfg.AutoInsertEnabled()
 		m.values.AutoInsertCustom = false
+	case cfgFieldContinueInsertAfterSave:
+		m.values.ContinueInsertAfterSave = defaultCfg.ContinueInsertAfterSaveEnabled()
+		m.values.ContinueInsertAfterSaveCustom = false
 	case cfgFieldDefaultListMode:
 		m.values.DefaultListMode = defaultCfg.DefaultListModeEnabled()
 		m.values.DefaultListModeCustom = false
@@ -351,6 +392,9 @@ func (m *configModel) resetBoolField(field configField) {
 	case cfgFieldConfirmDelete:
 		m.values.ConfirmDelete = defaultCfg.ConfirmDeleteEnabled()
 		m.values.ConfirmDeleteCustom = false
+	case cfgFieldConfirmEscapeWithText:
+		m.values.ConfirmEscapeWithText = defaultCfg.ConfirmEscapeWithTextEnabled()
+		m.values.ConfirmEscapeWithTextCustom = false
 	default:
 		changed = false
 	}
@@ -367,6 +411,9 @@ func (m *configModel) resetIntField(field configField) {
 	case cfgFieldStatusDuration:
 		m.values.StatusDuration = int(defaultCfg.StatusMessageDuration() / time.Millisecond)
 		m.values.StatusDurationSet = false
+	case cfgFieldEscapeConfirmTimeout:
+		m.values.EscapeConfirmTimeout = int(defaultCfg.EscapeConfirmTimeout() / time.Millisecond)
+		m.values.EscapeConfirmTimeoutSet = false
 	default:
 		return
 	}
@@ -400,15 +447,21 @@ func (m *configModel) startIntEdit(field configField) {
 	m.editingKind = cfgRowInt
 	m.editingField = field
 	m.editOriginal = ""
-	m.input.Placeholder = "Milliseconds"
+	placeholder := "Milliseconds"
 	value := ""
-	if field == cfgFieldStatusDuration {
+	switch field {
+	case cfgFieldStatusDuration:
+		placeholder = "Status duration (ms)"
 		if m.values.StatusDurationSet {
 			value = strconv.Itoa(m.values.StatusDuration)
-		} else {
-			value = ""
+		}
+	case cfgFieldEscapeConfirmTimeout:
+		placeholder = "Escape confirm timeout (ms)"
+		if m.values.EscapeConfirmTimeoutSet {
+			value = strconv.Itoa(m.values.EscapeConfirmTimeout)
 		}
 	}
+	m.input.Placeholder = placeholder
 	m.input.SetValue(value)
 	m.input.CursorEnd()
 	m.input.Focus()
@@ -443,19 +496,42 @@ func (m *configModel) commitQuestionEdit() {
 }
 
 func (m *configModel) commitIntEdit() {
+	field := m.editingField
 	raw := strings.TrimSpace(m.input.Value())
+	defaultCfg := app.Config{}
 	if raw == "" {
-		m.values.StatusDurationSet = false
+		switch field {
+		case cfgFieldStatusDuration:
+			m.values.StatusDurationSet = false
+			m.values.StatusDuration = int(defaultCfg.StatusMessageDuration() / time.Millisecond)
+		case cfgFieldEscapeConfirmTimeout:
+			m.values.EscapeConfirmTimeoutSet = false
+			m.values.EscapeConfirmTimeout = int(defaultCfg.EscapeConfirmTimeout() / time.Millisecond)
+		default:
+			m.setStatus("Enter a positive number of milliseconds.")
+			return
+		}
 	} else {
 		val, err := strconv.Atoi(raw)
 		if err != nil || val <= 0 {
 			m.setStatus("Enter a positive number of milliseconds.")
 			return
 		}
-		m.values.StatusDuration = val
-		m.values.StatusDurationSet = true
+		switch field {
+		case cfgFieldStatusDuration:
+			m.values.StatusDuration = val
+			m.values.StatusDurationSet = true
+		case cfgFieldEscapeConfirmTimeout:
+			m.values.EscapeConfirmTimeout = val
+			m.values.EscapeConfirmTimeoutSet = true
+		default:
+			m.setStatus("Enter a positive number of milliseconds.")
+			return
+		}
 	}
-	m.values.StatusDuration = m.values.resolvedStatusDuration()
+	if field == cfgFieldStatusDuration {
+		m.values.StatusDuration = m.values.resolvedStatusDuration()
+	}
 	m.finishEditing()
 	m.markDirty()
 }
@@ -484,6 +560,9 @@ func (m *configModel) toggleBool(field configField) {
 	case cfgFieldAutoInsert:
 		m.values.AutoInsert = !m.values.AutoInsert
 		m.values.AutoInsertCustom = true
+	case cfgFieldContinueInsertAfterSave:
+		m.values.ContinueInsertAfterSave = !m.values.ContinueInsertAfterSave
+		m.values.ContinueInsertAfterSaveCustom = true
 	case cfgFieldDefaultListMode:
 		m.values.DefaultListMode = !m.values.DefaultListMode
 		m.values.DefaultListModeCustom = true
@@ -493,6 +572,9 @@ func (m *configModel) toggleBool(field configField) {
 	case cfgFieldConfirmDelete:
 		m.values.ConfirmDelete = !m.values.ConfirmDelete
 		m.values.ConfirmDeleteCustom = true
+	case cfgFieldConfirmEscapeWithText:
+		m.values.ConfirmEscapeWithText = !m.values.ConfirmEscapeWithText
+		m.values.ConfirmEscapeWithTextCustom = true
 	}
 	m.markDirty()
 }
@@ -586,10 +668,13 @@ func (m *configModel) rebuildRows() {
 	rows = append(rows, configRow{kind: cfgRowAddQuestion, index: len(m.values.Questions)})
 	rows = append(rows, configRow{kind: cfgRowBool, field: cfgFieldShowHints})
 	rows = append(rows, configRow{kind: cfgRowBool, field: cfgFieldAutoInsert})
+	rows = append(rows, configRow{kind: cfgRowBool, field: cfgFieldContinueInsertAfterSave})
 	rows = append(rows, configRow{kind: cfgRowBool, field: cfgFieldDefaultListMode})
 	rows = append(rows, configRow{kind: cfgRowBool, field: cfgFieldAutoOpenIndex})
 	rows = append(rows, configRow{kind: cfgRowBool, field: cfgFieldConfirmDelete})
+	rows = append(rows, configRow{kind: cfgRowBool, field: cfgFieldConfirmEscapeWithText})
 	rows = append(rows, configRow{kind: cfgRowInt, field: cfgFieldStatusDuration})
+	rows = append(rows, configRow{kind: cfgRowInt, field: cfgFieldEscapeConfirmTimeout})
 	m.rows = rows
 	if m.selected >= len(rows) {
 		m.selected = len(rows) - 1
@@ -641,18 +726,28 @@ func (m *configModel) View() string {
 				b.WriteString(fmt.Sprintf("%s  Show hints: %s\n", marker, boolLabel(m.values.ShowHints, !m.values.ShowHintsCustom)))
 			case cfgFieldAutoInsert:
 				b.WriteString(fmt.Sprintf("%s  Auto-insert entries: %s\n", marker, boolLabel(m.values.AutoInsert, !m.values.AutoInsertCustom)))
+			case cfgFieldContinueInsertAfterSave:
+				b.WriteString(fmt.Sprintf("%s  Continue after save: %s\n", marker, boolLabel(m.values.ContinueInsertAfterSave, !m.values.ContinueInsertAfterSaveCustom)))
 			case cfgFieldDefaultListMode:
 				b.WriteString(fmt.Sprintf("%s  Default list mode: %s\n", marker, boolLabel(m.values.DefaultListMode, !m.values.DefaultListModeCustom)))
 			case cfgFieldAutoOpenIndex:
 				b.WriteString(fmt.Sprintf("%s  Auto-open index jumps: %s\n", marker, boolLabel(m.values.AutoOpenIndexJump, !m.values.AutoOpenIndexCustom)))
 			case cfgFieldConfirmDelete:
 				b.WriteString(fmt.Sprintf("%s  Confirm deletes: %s\n", marker, boolLabel(m.values.ConfirmDelete, !m.values.ConfirmDeleteCustom)))
+			case cfgFieldConfirmEscapeWithText:
+				b.WriteString(fmt.Sprintf("%s  Confirm escape with text: %s\n", marker, boolLabel(m.values.ConfirmEscapeWithText, !m.values.ConfirmEscapeWithTextCustom)))
 			case cfgFieldStatusDuration:
 				label := fmt.Sprintf("%d ms", m.values.resolvedStatusDuration())
 				if !m.values.StatusDurationSet {
 					label += " (default)"
 				}
 				b.WriteString(fmt.Sprintf("%s  Status duration: %s\n", marker, label))
+			case cfgFieldEscapeConfirmTimeout:
+				timeLabel := fmt.Sprintf("%d ms", m.values.EscapeConfirmTimeout)
+				if !m.values.EscapeConfirmTimeoutSet {
+					timeLabel += " (default)"
+				}
+				b.WriteString(fmt.Sprintf("%s  Escape confirm timeout: %s\n", marker, timeLabel))
 			}
 		}
 	}
